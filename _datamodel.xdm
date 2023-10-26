@@ -1,0 +1,538 @@
+<?xml version = '1.0' encoding = 'utf-8'?>
+<dataModel xmlns="http://xmlns.oracle.com/oxp/xmlp" version="2.0" xmlns:xdm="http://xmlns.oracle.com/oxp/xmlp" xmlns:xsd="http://wwww.w3.org/2001/XMLSchema" defaultDataSourceRef="ApplicationDB_FSCM">
+   <dataProperties>
+      <property name="include_parameters" value="true"/>
+      <property name="include_null_Element" value="true"/>
+      <property name="include_rowsettag" value="false"/>
+      <property name="exclude_tags_for_lob" value="false"/>
+      <property name="EXCLUDE_LINE_FEED_AND_CARRIAGE_RETURN_FOR_LOB" value="false"/>
+      <property name="xml_tag_case" value="upper"/>
+      <property name="generate_output_format" value="xml"/>
+      <property name="optimize_query_executions" value="false"/>
+      <property name="enable_xml_chunks" value=""/>
+      <property name="sql_monitor_report_generated" value="false"/>
+   </dataProperties>
+   <dataSets>
+      <dataSet name="DS_LEGAL_ENTITY" type="complex">
+         <sql>
+            <![CDATA[SELECT ( SELECT v.description
+            FROM
+                fnd_flex_value_sets   s,
+                fnd_flex_values_vl    v
+            WHERE
+                s.flex_value_set_name = 'NEO_EC_AMBIENTE_INTEME'
+                AND s.flex_value_set_id = v.flex_value_set_id
+                AND v.enabled_flag = 'Y'
+                AND sysdate BETWEEN nvl(v.start_date_active, sysdate) AND nvl(v.end_date_active, sysdate)
+
+) ambiente_emision ---1 para test, 2 para PROD Jgmz
+      ,hz_locations.address1 direccion_matriz
+      ,le.attribute1 contrib_especial
+      ,decode(nvl(le.attribute2,'N'),'Y','SI','NO') obligado_conta
+       -- ,bs.attribute2 establecimiento --consultar
+      ,substr(xle_registrations.registered_name,6,100) nombre_comercial
+      ,'1' origen
+       -- ,bs.attribute3 punto_emision
+      ,substr(xle_registrations.registered_name,6,100) razon_social
+      ,xle_registrations.registration_number ruc
+       --,trx.trx_number secuencial
+      ,'1' tipo_emision
+      ,le.legal_entity_id
+  FROM fusion.xle_jurisdictions_b xle_jurisdictions_b
+      ,fusion.hz_locations        hz_locations
+      ,fusion.xle_entity_profiles le
+      ,fusion.xle_registrations   xle_registrations
+--,ra_customer_trx_all        trx
+--,ra_batch_sources_all       bs
+ WHERE 1 = 1
+      --AND trx.batch_source_seq_id = bs.batch_source_seq_id
+      --AND le.legal_entity_id = trx.legal_entity_id
+   AND xle_registrations.source_id = le.legal_entity_id
+   AND xle_registrations.location_id = hz_locations.location_id
+   AND xle_jurisdictions_b.jurisdiction_id = xle_registrations.jurisdiction_id
+   AND hz_locations.country = 'EC'
+   AND xle_registrations.source_table = 'XLE_ENTITY_PROFILES']]>
+         </sql>
+      </dataSet>
+      <dataSet name="DS_CAB" type="complex">
+         <sql>
+            <![CDATA[WITH locec_contact_points AS (
+SELECT	hp.party_id,hcp.contact_point_type,nvl(hcp.phone_number, '') phone,
+		nvl(hcp.email_address, '') email,hcp.primary_flag,hp2.party_name contact_name
+FROM	hz_cust_accounts		hca,
+		hz_contact_points		hcp,
+		hz_relationships		hr,
+		hz_parties			hp,
+		hz_cust_account_roles	hcar,
+		hz_cust_acct_sites_all	hcsa,
+		hz_party_sites			hps,
+		hz_parties			hp2,
+		hz_org_contacts		hoc
+WHERE	hcp.relationship_id = hr.relationship_id
+AND		hr.relationship_code = 'CONTACT_OF'
+AND		hr.object_id = hp.party_id
+AND		hr.subject_id = hp2.party_id
+AND		nvl(hcp.end_date, SYSDATE + 5) > SYSDATE
+AND		nvl(hcar.status, 'A') = 'A'
+AND		hcar.relationship_id = hcp.relationship_id
+AND		hp.party_id = hca.party_id
+AND		hcar.cust_account_id = hca.cust_account_id
+AND		hca.cust_account_id = hcsa.cust_account_id
+AND		hcar.cust_acct_site_id = hcsa.cust_acct_site_id
+AND		hcsa.party_site_id = hps.party_site_id
+AND		hoc.party_relationship_id = hr.relationship_id
+AND		hoc.conflict_id = hr.conflict_id
+AND		UPPER(hoc.job_title) = 'COMPELEC'
+ORDER BY
+		hcp.primary_flag DESC),
+
+locec_trx_modi AS (
+SELECT	arp.customer_trx_id,rct.trx_date,rctt.attribute2 tipo_comp,
+		decode(length(substr(rct.trx_number,1,17)),17,
+			substr(rct.trx_number,1,17),
+			nvl(rctt.attribute4,'001')||'-'||nvl(rctt.attribute5,'001')||'-'||
+			LPAD(rct.trx_number,9,'0')) trx_number
+FROM	ra_customer_trx_all rct,
+		ra_cust_trx_types_all rctt,
+		ar_receivable_applications_all arp
+WHERE	rctt.cust_trx_type_seq_id = rct.cust_trx_type_seq_id
+AND	arp.applied_customer_trx_id = rct.customer_trx_id
+AND	arp.display = 'Y'),
+-- 12/01/2022
+locec_projects AS (
+SELECT	pp.segment1,pih.contract_id,pih.invoice_num
+FROM	pjb_invoice_headers pih,
+		pjb_inv_line_dists pild,
+		pjf_projects_all_vl pp
+WHERE	pild.contract_id = pih.contract_id
+AND		pild.invoice_id = pih.invoice_id
+AND		pp.project_id = pild.linked_project_id)
+-- 12/01/2022
+
+SELECT	trx.legal_entity_id
+		,trx.customer_trx_id
+		-->Tag InfoFactura       
+		,'04' cod_documento
+		,LPAD(trx.doc_sequence_value,9,'0') secuencial
+		,trx.trx_number
+		,ctta.attribute4||'-'||ctta.attribute5||'-'||LPAD(trx.doc_sequence_value, 9, '0') new_trx_number
+		,nvl((SELECT	rctt_inv.attribute2
+			FROM	ra_customer_trx_all rct_inv,
+					ra_cust_trx_types_all rctt_inv
+			WHERE	rctt_inv.cust_trx_type_seq_id = rct_inv.cust_trx_type_seq_id
+			AND	rct_inv.trx_number = trx.attribute12
+			AND	rct_inv.bill_to_customer_id = trx.bill_to_customer_id
+			AND	rct_inv.org_id = trx.org_id),(
+			SELECT	tipo_comp
+			FROM	locec_trx_modi ltm
+			WHERE	ltm.customer_trx_id = trx.customer_trx_id
+			AND	ROWNUM = 1)) cod_doc_modif
+		,trx.trx_date fecha_emision
+		,nvl((SELECT	to_char(trx_date, 'dd/MM/yyyy')
+			FROM	ra_customer_trx_all rct_inv
+			WHERE	rct_inv.trx_number = trx.attribute12
+			AND	rct_inv.bill_to_customer_id = trx.bill_to_customer_id
+			AND	rct_inv.org_id = trx.org_id),(
+			SELECT	to_char(trx_date, 'dd/MM/yyyy') 
+			FROM	locec_trx_modi ltm
+			WHERE	ltm.customer_trx_id = trx.customer_trx_id
+			AND	ROWNUM = 1)) fecha_emision_sust  
+		,hz.party_number id_comprador
+		,nvl(cust.attribute6,hz.jgzz_fiscal_code) party_number
+		,trx.invoice_currency_code moneda
+		,nvl(al_cm.meaning,'Sin Motivo') motivo
+		,nvl(trx.attribute12,(
+			SELECT	trx_number
+			FROM	locec_trx_modi ltm
+			WHERE	ltm.customer_trx_id = trx.customer_trx_id
+			AND	ROWNUM = 1)) num_doc_modificado
+		--,hz.party_name razon_social_comp (08/11/2022 - GM)
+		--,cust.account_name razon_social_comp (20/12/2022 - GM)
+    ,decode(cust.attribute13,'Divestiture',hz.party_name,'PwC',cust.account_name,hz.party_name) razon_social_comp
+		,'?' rise
+		,hcas.attribute2 tipo_id_comprador
+		,'0.00' total_descuento
+		,abs((	SELECT	SUM(nvl(rctl.extended_amount, 0))
+			FROM	ra_customer_trx_lines_all rctl
+			WHERE	rctl.customer_trx_id = trx.customer_trx_id
+			AND	rctl.line_type = 'LINE')) total_sin_impuestos
+		,(SELECT	
+				hl.address_line_1||', '||hl.town_or_city
+		FROM	hr_locations hl
+		WHERE	ctta.attribute6 in (hl.location_code,hl.location_code || ' - Quito')) dir_establecimiento
+		,bs.name batch_source_name
+		,sis.set_name transaction_set_name
+		,nvl((	SELECT	phone
+			FROM	locec_contact_points lcp
+			WHERE	lcp.party_id = hz.party_id
+			AND		contact_point_type = 'PHONE'
+			AND		ROWNUM = 1),'.') telefono
+		,nvl((	SELECT	email
+			FROM	locec_contact_points lcp
+			WHERE	lcp.party_id = hz.party_id
+			AND		contact_point_type = 'EMAIL'
+			AND		ROWNUM = 1),'.') email
+		,nvl((	SELECT	contact_name
+			FROM	locec_contact_points lcp
+			WHERE	lcp.party_id = hz.party_id
+			AND		ROWNUM = 1),'.') atencion
+		,hz.address1 direccionc
+--<i> LBRONCANO: 23/01/2023
+		,nvl((SELECT	lp.segment1 FROM locec_projects lp
+			WHERE	contract_id = trx.interface_header_attribute2
+			AND		invoice_num = trx.interface_header_attribute3
+			AND		ROWNUM = 1),'.')||' C:'||
+			nvl(trx.interface_header_attribute1,'.') proyecto
+--<f> LBRONCANO: 23/01/2023		
+		,NULL forma_pago
+		,NULL plazo
+		,NULL unidad_tiempo
+		,ctta.attribute4 establecimiento
+		,ctta.attribute5 punto_emision
+		,abs(rctgl.amount) total_amount_cab
+		,abs(rctgl.amount) valor_modificado
+FROM	ra_customer_trx_all		trx
+		,hz_cust_accounts		cust
+		,hz_cust_acct_sites_all	hcas
+		,hz_cust_site_uses_all	hcsu
+		,hz_parties		hz
+		,hz_organization_profiles     hop
+		,ra_cust_trx_types_all        ctta
+		,ra_batch_sources_all         bs
+		,zx_party_tax_profile         zxp
+		,fnd_lookup_values_vl         flu
+		,ra_terms_vl   	               rt
+		,ra_cust_trx_line_gl_dist_all rctgl
+		,fnd_setid_sets_vl            sis
+		,fun_bu_perf_v                bu
+		,ar_lookups                   al_cm
+WHERE	1 = 1
+AND	trx.bill_to_customer_id = cust.cust_account_id
+AND	trx.bill_to_customer_id = hcas.cust_account_id
+AND	trx.bill_to_site_use_id = hcsu.site_use_id
+AND	hcas.cust_acct_site_id = hcsu.cust_acct_site_id
+AND	cust.party_id = hz.party_id
+AND	trx.cust_trx_type_seq_id = ctta.cust_trx_type_seq_id
+AND	trx.batch_source_seq_id = bs.batch_source_seq_id
+AND	hz.party_id = zxp.party_id(+)
+AND	zxp.registration_type_code = flu.lookup_code(+)
+AND	flu.lookup_type(+) = 'ZX_REGISTRATIONS_TYPE'
+AND	trx.batch_source_seq_id = bs.batch_source_seq_id
+AND	bs.set_id = sis.set_id
+AND	trx.org_id = bu.bu_id
+AND	trx.term_id = rt.term_id(+)
+AND	hz.party_id = hop.party_id(+)
+AND	trx.customer_trx_id = rctgl.customer_trx_id(+)
+AND	al_cm.lookup_code(+) = trx.reason_code
+AND	al_cm.lookup_type(+) = 'CREDIT_MEMO_REASON'
+AND	rctgl.account_class(+) = 'REC'
+AND	rctgl.latest_rec_flag(+) = 'Y'
+AND	(trx.attribute_category IS NULL OR nvl(trx.attribute11, 'NES') NOT IN ('NV', 'VV', 'NS', 'VS'))
+AND	trx.complete_flag = 'Y'
+AND	ctta.type IN ('CM')
+AND	ctta.attribute3 = 'E' --tipo de emision
+AND	ctta.attribute2 = '04' --tipo de comprobante = NC
+AND	trx.attribute_category is not null --valor de contexto
+AND	bu.bu_name = 'PwC Ecuador'
+AND        trx.customer_trx_id = :CUSTOMER_TRX_ID
+--AND TRX.TRX_NUMBER in ('1119')]]>
+         </sql>
+      </dataSet>
+      <dataSet name="DS_DET" type="complex">
+         <sql>
+            <![CDATA[select	customer_trx_id,
+		line_number,
+		line_type,
+		'1' cantidad,
+		to_char(line_number) cod_adicional,
+		'2' codigo,
+		'01' cod_interno,
+		desc_detalle,
+		'0.00' descuento,
+		trim(to_char(abs(sum(base_imponible)),'999999999999.00')) base_imponible,
+		cod_porcentaje,
+		trim(to_char(abs(sum(valor)),'999999999999.00')) valor,
+		trim(to_char(abs(sum(base_imponible)),'999999999999.00')) precio_unitario,
+		tarifa,
+		trim(to_char(abs(sum(base_imponible)),'999999999999.00')) total_sin_impuestos
+from	(
+select	rctl.customer_trx_id,
+		rctl.line_number,
+		rctl.line_type,
+		trim(rctl.description) desc_detalle,
+		rctl.unit_selling_price *
+			nvl(rctl.quantity_credited, rctl.quantity_invoiced) base_imponible,
+		NVL((select	zrc.reporting_code_char_value
+		from	zx_report_codes_assoc zrca,
+				zx_reporting_types_b  zrt,
+				zx_reporting_codes_b  zrc,
+				zx_rates_b            zr
+		WHERE	zrt.reporting_type_id = zrca.reporting_type_id
+		and		zrca.reporting_code_id = zrc.reporting_code_id
+		and		zrca.entity_id = zr.tax_rate_id
+		and		zrca.entity_code = 'ZX_RATES'
+		and		zr.tax_rate_id = zl.tax_rate_id),'0') cod_porcentaje,
+		nvl(zl.tax_rate/100*(rctl.unit_selling_price *
+			nvl(rctl.quantity_credited, rctl.quantity_invoiced)),0) valor,
+		nvl(zl.tax_rate,'0.00') tarifa
+from	ra_customer_trx_lines_all rctl,
+		ra_customer_trx_lines_all rctltax,
+		zx_lines                  zl,
+		inv_units_of_measure_vl   uomb,
+		ra_customer_trx_all       rct,
+		ra_cust_trx_types_all     rctt,
+		egp_system_items_b        mtl,
+		ar_memo_lines_all_vl      aml
+where	rctl.line_type = 'LINE'
+and		rctl.customer_trx_line_id = rctltax.link_to_cust_trx_line_id(+)
+and		rctltax.line_type(+) = 'TAX'
+and		rctl.customer_trx_id = zl.trx_id(+)
+and		rctl.customer_trx_line_id = zl.trx_line_id(+)
+and		zl.entity_code(+) = 'TRANSACTIONS'
+and		rctl.uom_code = uomb.uom_code(+)
+and		rctl.customer_trx_id = rct.customer_trx_id
+and		rct.cust_trx_type_seq_id = rctt.cust_trx_type_seq_id
+and		mtl.organization_id(+) = rctl.warehouse_id
+and		mtl.inventory_item_id(+) = rctl.inventory_item_id
+and		rctl.memo_line_seq_id = aml.memo_line_seq_id(+)
+and		not exists (
+		select	petv.event_type_name
+		from	pjf_event_types_vl petv,
+				pjb_inv_line_dists pild,
+				ra_customer_trx_lines_all rctl_inv
+		where	to_char(pild.contract_id) = rctl_inv.interface_line_attribute2
+		and		to_char(pild.invoice_line_id) = rctl_inv.interface_line_attribute5
+		and		petv.event_type_id = pild.transaction_type_id
+		and		rctl_inv.customer_trx_line_id = rctl.customer_trx_line_id
+		and		upper(petv.event_type_name) in (
+				'GASTOS DE TERCEROS INCLUIDOS EN EL HONORARIO LOCALES',
+				'GASTOS DE TERCEROS INCLUIDOS EN EL HONORARIO EXTERIOR'))
+UNION ALL
+select	rctl.customer_trx_id,
+		(select	line_number
+		from	ra_customer_trx_lines_all rctl1
+		where	rctl1.customer_trx_id = rctl.customer_trx_id
+		and		rctl1.line_number != rctl.line_number
+		and		rctl1.line_type = 'LINE'
+		and		rownum = 1) line_number,
+		rctl.line_type,
+		(select	trim(rctl1.description)
+		from	ra_customer_trx_lines_all rctl1
+		where	rctl1.customer_trx_id = rctl.customer_trx_id
+		and		rctl1.line_number != rctl.line_number
+		and		rctl1.line_type = 'LINE'
+		and		rownum = 1) desc_detalle,
+		rctl.unit_selling_price *
+			nvl(rctl.quantity_credited, rctl.quantity_invoiced) base_imponible,
+		NVL((select	zrc.reporting_code_char_value
+		from	zx_report_codes_assoc zrca,
+				zx_reporting_types_b  zrt,
+				zx_reporting_codes_b  zrc,
+				zx_rates_b            zr
+		where	zrt.reporting_type_id = zrca.reporting_type_id
+		and		zrca.reporting_code_id = zrc.reporting_code_id
+		and		zrca.entity_id = zr.tax_rate_id
+		and		zrca.entity_code = 'ZX_RATES'
+		and		zr.tax_rate_id = zl.tax_rate_id),'0') cod_porcentaje,
+		nvl(zl.tax_rate/100*(rctl.unit_selling_price *
+			nvl(rctl.quantity_credited, rctl.quantity_invoiced)),0) valor,
+		nvl(zl.tax_rate,'0.00') tarifa
+from	ra_customer_trx_lines_all rctl,
+		ra_customer_trx_lines_all rctltax,
+		zx_lines                  zl,
+		inv_units_of_measure_vl   uomb,
+		ra_customer_trx_all       rct,
+		ra_cust_trx_types_all     rctt,
+		egp_system_items_b        mtl,
+		ar_memo_lines_all_vl      aml
+where	rctl.line_type = 'LINE'
+and		rctl.customer_trx_line_id = rctltax.link_to_cust_trx_line_id(+)
+and		rctltax.line_type(+) = 'TAX'
+and		rctl.customer_trx_id = zl.trx_id(+)
+and		rctl.customer_trx_line_id = zl.trx_line_id(+)
+and		zl.entity_code(+) = 'TRANSACTIONS'
+and		rctl.uom_code = uomb.uom_code(+)
+and		rctl.customer_trx_id = rct.customer_trx_id
+and		rct.cust_trx_type_seq_id = rctt.cust_trx_type_seq_id
+and		mtl.organization_id(+) = rctl.warehouse_id
+and		mtl.inventory_item_id(+) = rctl.inventory_item_id
+and		rctl.memo_line_seq_id = aml.memo_line_seq_id(+)
+and		exists (
+		select	petv.event_type_name
+		from	pjf_event_types_vl petv,
+				pjb_inv_line_dists pild,
+				ra_customer_trx_lines_all rctl_inv
+		where	to_char(pild.contract_id) = rctl_inv.interface_line_attribute2
+		and		to_char(pild.invoice_line_id) = rctl_inv.interface_line_attribute5
+		and		petv.event_type_id = pild.transaction_type_id
+		and		rctl_inv.customer_trx_line_id = rctl.customer_trx_line_id
+		and		upper(petv.event_type_name) in (
+				'GASTOS DE TERCEROS INCLUIDOS EN EL HONORARIO LOCALES',
+				'GASTOS DE TERCEROS INCLUIDOS EN EL HONORARIO EXTERIOR'))
+				)
+group by
+		customer_trx_id,
+		line_number,
+		line_type,
+		desc_detalle,
+		cod_porcentaje,
+		tarifa
+order by 2]]>
+         </sql>
+      </dataSet>
+      <dataSet name="DS_TAX" type="complex">
+         <sql>
+            <![CDATA[select	rctl.customer_trx_id,
+		abs(sum(rctl.extended_amount)) as base_imponible,
+		'2' codigo_sri,
+		nvl((select	zrc.reporting_code_char_value
+		from	zx_report_codes_assoc zrca,
+				zx_reporting_types_b  zrt,
+				zx_reporting_codes_b  zrc,
+				zx_rates_b            zr
+		where	zrt.reporting_type_id = zrca.reporting_type_id
+		and		zrca.reporting_code_id = zrc.reporting_code_id
+		and		zrca.entity_id = zr.tax_rate_id
+		and		zrca.entity_code = 'ZX_RATES'
+		and		zr.tax_rate_id = zl.tax_rate_id),'0') cod_porcentaje,
+		nvl(zl.tax_rate,'0.00') porcen_valor,
+		nvl(zl.tax_rate,'0.00') tarifa,
+		nvl(abs(sum(rctl.tax_recoverable)), 0) valor,
+		nvl(rctl.tax_classification_code,'ND') tax_classification_code
+from	ra_customer_trx_lines_all rctl,
+		ra_customer_trx_lines_all rctltax,
+		zx_lines                  zl,
+		inv_units_of_measure_vl   uomb,
+		ra_customer_trx_all       rct,
+		ra_cust_trx_types_all     rctt,
+		egp_system_items_b        mtl,
+		ar_memo_lines_all_b       aml --KMORI 20190218 UBL2.1
+where	rctl.line_type = 'LINE'
+and		rctl.customer_trx_line_id = rctltax.link_to_cust_trx_line_id(+)
+and		rctltax.line_type(+) = 'TAX'
+and		rctl.customer_trx_id = zl.trx_id(+)
+and		rctl.customer_trx_line_id = zl.trx_line_id(+) --KMORI 20191202 Se agrego porque hay items que tienen el mismo número de linea
+and		zl.entity_code(+) = 'TRANSACTIONS'
+and		rctl.uom_code = uomb.uom_code(+)
+and		rctl.customer_trx_id = rct.customer_trx_id
+and		rct.cust_trx_type_seq_id = rctt.cust_trx_type_seq_id
+and		mtl.organization_id(+) = rctl.warehouse_id
+and		mtl.inventory_item_id(+) = rctl.inventory_item_id
+and		rctl.memo_line_seq_id = aml.memo_line_seq_id(+)
+group by	rctl.customer_trx_id,zl.tax_rate,zl.tax_rate,zl.tax_rate_id,
+		rctl.tax_classification_code
+order by	2]]>
+         </sql>
+      </dataSet>
+      <link name="dl-3543" parentGroup="G_CAB" parentColumn="CUSTOMER_TRX_ID" childQuery="DS_TAX" childColumn="rctl.customer_trx_id" childColumnAlias="CUSTOMER_TRX_ID"/>
+      <link name="dl-4611" parentGroup="G_CAB" parentColumn="CUSTOMER_TRX_ID" childQuery="DS_DET" childColumn="customer_trx_id" childColumnAlias="CUSTOMER_TRX_ID"/>
+      <link name="dl-9286" parentGroup="G_CAB" parentColumn="LEGAL_ENTITY_ID" childQuery="DS_LEGAL_ENTITY" childColumn="le.legal_entity_id" childColumnAlias="LEGAL_ENTITY_ID"/>
+   </dataSets>
+   <output rootName="DATA_DS" uniqueRowName="false">
+      <nodeList name="data-structure">
+         <dataStructure tagName="DATA_DS">
+            <group name="G_CAB" label="G_CAB" source="DS_CAB">
+               <element name="CUSTOMER_TRX_ID" value="CUSTOMER_TRX_ID" label="CUSTOMER_TRX_ID" dataType="xsd:double" breakOrder="" fieldOrder="2"/>
+               <element name="LEGAL_ENTITY_ID" value="LEGAL_ENTITY_ID" label="LEGAL_ENTITY_ID" dataType="xsd:double" breakOrder="" fieldOrder="1"/>
+               <element name="TOTAL_DESCUENTO" value="TOTAL_DESCUENTO" label="TOTAL_DESCUENTO" dataType="xsd:string" breakOrder="" fieldOrder="18"/>
+               <element name="TOTAL_SIN_IMPUESTOS" value="TOTAL_SIN_IMPUESTOS" label="TOTAL_SIN_IMPUESTOS" dataType="xsd:double" breakOrder="" fieldOrder="19"/>
+               <element name="FECHA_EMISION" value="FECHA_EMISION" label="FECHA_EMISION" dataType="xsd:date" breakOrder="" fieldOrder="8" formatMask=""/>
+               <element name="MONEDA" value="MONEDA" label="MONEDA" dataType="xsd:string" breakOrder="" fieldOrder="12"/>
+               <element name="RAZON_SOCIAL_COMP" value="RAZON_SOCIAL_COMP" label="RAZON_SOCIAL_COMP" dataType="xsd:string" breakOrder="" fieldOrder="15"/>
+               <element name="TIPO_ID_COMPRADOR" value="TIPO_ID_COMPRADOR" label="TIPO_ID_COMPRADOR" dataType="xsd:string" breakOrder="" fieldOrder="17"/>
+               <element name="FECHA_EMISION_SUST" value="FECHA_EMISION_SUST" label="FECHA_EMISION_SUST" dataType="xsd:string" breakOrder="" fieldOrder="9"/>
+               <element name="ID_COMPRADOR" value="ID_COMPRADOR" label="ID_COMPRADOR" dataType="xsd:string" breakOrder="" fieldOrder="10"/>
+               <element name="MOTIVO" value="MOTIVO" label="MOTIVO" dataType="xsd:string" breakOrder="" fieldOrder="13"/>
+               <element name="RISE" value="RISE" label="RISE" dataType="xsd:string" breakOrder="" fieldOrder="16"/>
+               <element name="COD_DOC_MODIF" value="COD_DOC_MODIF" label="COD_DOC_MODIF" dataType="xsd:string" breakOrder="" fieldOrder="7"/>
+               <element name="COD_DOCUMENTO" value="COD_DOCUMENTO" label="COD_DOCUMENTO" dataType="xsd:string" breakOrder="" fieldOrder="3"/>
+               <element name="SECUENCIAL" value="SECUENCIAL" label="SECUENCIAL" dataType="xsd:string" breakOrder="" fieldOrder="4"/>
+               <element name="BATCH_SOURCE_NAME" value="BATCH_SOURCE_NAME" label="BATCH_SOURCE_NAME" dataType="xsd:string" breakOrder="" fieldOrder="21"/>
+               <element name="TRANSACTION_SET_NAME" value="TRANSACTION_SET_NAME" label="TRANSACTION_SET_NAME" dataType="xsd:string" breakOrder="" fieldOrder="22"/>
+               <element name="TELEFONO" value="TELEFONO" label="TELEFONO" dataType="xsd:string" breakOrder="" fieldOrder="23"/>
+               <element name="EMAIL" value="EMAIL" label="EMAIL" dataType="xsd:string" breakOrder="" fieldOrder="24"/>
+               <element name="ATENCION" value="ATENCION" label="ATENCION" dataType="xsd:string" breakOrder="" fieldOrder="25"/>
+               <element name="DIRECCIONC" value="DIRECCIONC" label="DIRECCIONC" dataType="xsd:string" breakOrder="" fieldOrder="26"/>
+               <element name="FORMA_PAGO" value="FORMA_PAGO" label="FORMA_PAGO" dataType="xsd:string" breakOrder="" fieldOrder="28"/>
+               <element name="PLAZO" value="PLAZO" label="PLAZO" dataType="xsd:string" breakOrder="" fieldOrder="29"/>
+               <element name="UNIDAD_TIEMPO" value="UNIDAD_TIEMPO" label="UNIDAD_TIEMPO" dataType="xsd:string" breakOrder="" fieldOrder="30"/>
+               <element name="NUM_DOC_MODIFICADO" value="NUM_DOC_MODIFICADO" label="NUM_DOC_MODIFICADO" dataType="xsd:string" breakOrder="" fieldOrder="14"/>
+               <element name="PARTY_NUMBER" value="PARTY_NUMBER" label="PARTY_NUMBER" dataType="xsd:string" breakOrder="" fieldOrder="11"/>
+               <element name="ESTABLECIMIENTO" value="ESTABLECIMIENTO" label="ESTABLECIMIENTO" dataType="xsd:string" breakOrder="" fieldOrder="31"/>
+               <element name="PUNTO_EMISION" value="PUNTO_EMISION" label="PUNTO_EMISION" dataType="xsd:string" breakOrder="" fieldOrder="32"/>
+               <element name="TOTAL_AMOUNT_CAB" value="TOTAL_AMOUNT_CAB" label="TOTAL_AMOUNT_CAB" dataType="xsd:double" breakOrder="" fieldOrder="33"/>
+               <element name="TRX_NUMBER" value="TRX_NUMBER" label="TRX_NUMBER" dataType="xsd:string" breakOrder="" fieldOrder="5"/>
+               <element name="VALOR_MODIFICADO" value="VALOR_MODIFICADO" label="VALOR_MODIFICADO" dataType="xsd:double" breakOrder="" fieldOrder="34"/>
+               <element name="DIR_ESTABLECIMIENTO" value="DIR_ESTABLECIMIENTO" label="DIR_ESTABLECIMIENTO" dataType="xsd:string" breakOrder="" fieldOrder="20"/>
+               <element name="NEW_TRX_NUMBER" value="NEW_TRX_NUMBER" label="NEW_TRX_NUMBER" dataType="xsd:string" breakOrder="" fieldOrder="6"/>
+               <element name="PROYECTO" value="PROYECTO" label="PROYECTO" dataType="xsd:string" breakOrder="" fieldOrder="27"/>
+               <group name="G_TAX" label="G_TAX" source="DS_TAX">
+                  <element name="CUSTOMER_TRX_ID" value="CUSTOMER_TRX_ID" label="CUSTOMER_TRX_ID" dataType="xsd:double" breakOrder="" fieldOrder="1"/>
+                  <element name="BASE_IMPONIBLE" value="BASE_IMPONIBLE" label="BASE_IMPONIBLE" dataType="xsd:double" breakOrder="" fieldOrder="2"/>
+                  <element name="CODIGO_SRI" value="CODIGO_SRI" label="CODIGO_SRI" dataType="xsd:string" breakOrder="" fieldOrder="3"/>
+                  <element name="COD_PORCENTAJE" value="COD_PORCENTAJE" label="COD_PORCENTAJE" dataType="xsd:string" breakOrder="" fieldOrder="4"/>
+                  <element name="PORCEN_VALOR" value="PORCEN_VALOR" label="PORCEN_VALOR" dataType="xsd:double" breakOrder="" fieldOrder="5"/>
+                  <element name="VALOR" value="VALOR" label="VALOR" dataType="xsd:double" breakOrder="" fieldOrder="7"/>
+                  <element name="TARIFA" value="TARIFA" label="TARIFA" dataType="xsd:double" breakOrder="" fieldOrder="6"/>
+                  <element name="TAX_CLASSIFICATION_CODE" value="TAX_CLASSIFICATION_CODE" label="TAX_CLASSIFICATION_CODE" dataType="xsd:string" breakOrder="" fieldOrder="8"/>
+               </group>
+               <group name="G_DET" label="G_DET" source="DS_DET">
+                  <element name="CUSTOMER_TRX_ID" value="CUSTOMER_TRX_ID" label="CUSTOMER_TRX_ID" dataType="xsd:double" breakOrder="" fieldOrder="1"/>
+                  <element name="LINE_NUMBER" value="LINE_NUMBER" label="LINE_NUMBER" dataType="xsd:double" breakOrder="" fieldOrder="2"/>
+                  <element name="LINE_TYPE" value="LINE_TYPE" label="LINE_TYPE" dataType="xsd:string" breakOrder="" fieldOrder="3"/>
+                  <element name="CANTIDAD" value="CANTIDAD" label="CANTIDAD" dataType="xsd:string" breakOrder="" fieldOrder="4"/>
+                  <element name="DESC_DETALLE" value="DESC_DETALLE" label="DESC_DETALLE" dataType="xsd:string" breakOrder="" fieldOrder="8"/>
+                  <element name="DESCUENTO" value="DESCUENTO" label="DESCUENTO" dataType="xsd:string" breakOrder="" fieldOrder="9"/>
+                  <element name="COD_ADICIONAL" value="COD_ADICIONAL" label="COD_ADICIONAL" dataType="xsd:string" breakOrder="" fieldOrder="5"/>
+                  <element name="COD_INTERNO" value="COD_INTERNO" label="COD_INTERNO" dataType="xsd:string" breakOrder="" fieldOrder="7"/>
+                  <element name="BASE_IMPONIBLE" value="BASE_IMPONIBLE" label="BASE_IMPONIBLE" dataType="xsd:string" breakOrder="" fieldOrder="10"/>
+                  <element name="COD_PORCENTAJE" value="COD_PORCENTAJE" label="COD_PORCENTAJE" dataType="xsd:string" breakOrder="" fieldOrder="11"/>
+                  <element name="PRECIO_UNITARIO" value="PRECIO_UNITARIO" label="PRECIO_UNITARIO" dataType="xsd:string" breakOrder="" fieldOrder="13"/>
+                  <element name="TARIFA" value="TARIFA" label="TARIFA" dataType="xsd:double" breakOrder="" fieldOrder="14"/>
+                  <element name="VALOR" value="VALOR" label="VALOR" dataType="xsd:string" breakOrder="" fieldOrder="12"/>
+                  <element name="TOTAL_SIN_IMPUESTOS" value="TOTAL_SIN_IMPUESTOS" label="TOTAL_SIN_IMPUESTOS" dataType="xsd:string" breakOrder="" fieldOrder="15"/>
+                  <element name="CODIGO" value="CODIGO" label="CODIGO" dataType="xsd:string" breakOrder="" fieldOrder="6"/>
+               </group>
+               <group name="G_LE" label="G_LE" source="DS_LEGAL_ENTITY">
+                  <element name="LEGAL_ENTITY_ID" value="LEGAL_ENTITY_ID" label="LEGAL_ENTITY_ID" dataType="xsd:double" breakOrder="" fieldOrder="10"/>
+                  <element name="AMBIENTE_EMISION" value="AMBIENTE_EMISION" label="AMBIENTE_EMISION" dataType="xsd:string" breakOrder="" fieldOrder="1"/>
+                  <element name="DIRECCION_MATRIZ" value="DIRECCION_MATRIZ" label="DIRECCION_MATRIZ" dataType="xsd:string" breakOrder="" fieldOrder="2"/>
+                  <element name="ORIGEN" value="ORIGEN" label="ORIGEN" dataType="xsd:string" breakOrder="" fieldOrder="6"/>
+                  <element name="RAZON_SOCIAL" value="RAZON_SOCIAL" label="RAZON_SOCIAL" dataType="xsd:string" breakOrder="" fieldOrder="7"/>
+                  <element name="RUC" value="RUC" label="RUC" dataType="xsd:string" breakOrder="" fieldOrder="8"/>
+                  <element name="TIPO_EMISION" value="TIPO_EMISION" label="TIPO_EMISION" dataType="xsd:string" breakOrder="" fieldOrder="9"/>
+                  <element name="NOMBRE_COMERCIAL" value="NOMBRE_COMERCIAL" label="NOMBRE_COMERCIAL" dataType="xsd:string" breakOrder="" fieldOrder="5"/>
+                  <element name="CONTRIB_ESPECIAL" value="CONTRIB_ESPECIAL" label="CONTRIB_ESPECIAL" dataType="xsd:string" breakOrder="" fieldOrder="3"/>
+                  <element name="OBLIGADO_CONTA" value="OBLIGADO_CONTA" label="OBLIGADO_CONTA" dataType="xsd:string" breakOrder="" fieldOrder="4"/>
+               </group>
+            </group>
+         </dataStructure>
+      </nodeList>
+   </output>
+   <eventTriggers/>
+   <lexicals/>
+   <parameters>
+      <parameter name="CUSTOMER_TRX_ID" dataType="xsd:string" rowPlacement="1">
+         <input label="CUSTOMER_TRX_ID"/>
+      </parameter>
+   </parameters>
+   <valueSets/>
+   <bursting/>
+   <validations>
+      <validation>N</validation>
+   </validations>
+   <display>
+      <layouts>
+         <layout name="DS_LEGAL_ENTITY" left="35px" top="396px"/>
+         <layout name="DS_CAB" left="324px" top="396px"/>
+         <layout name="DS_DET" left="802px" top="396px"/>
+         <layout name="DS_TAX" left="694px" top="573px"/>
+         <layout name="DATA_DS" left="0px" top="34px"/>
+      </layouts>
+      <groupLinks>
+         <groupLink name="dl-4949" parentGroup="G_CAB" childGroup="G_LE"/>
+         <groupLink name="dl-6800" parentGroup="G_CAB" childGroup="G_TAX"/>
+         <groupLink name="dl-7861" parentGroup="G_CAB" childGroup="G_DET"/>
+      </groupLinks>
+   </display>
+</dataModel>

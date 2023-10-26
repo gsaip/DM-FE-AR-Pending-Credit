@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<metadata>
+  <entries>
+    <entry>
+      <key><![CDATA[bip:DisplayName]]></key>
+      <value><![CDATA[DM FE AR Pending Credit]]></value>
+    </entry>
+    <entry>
+      <key><![CDATA[DESCRIPTION]]></key>
+      <value><![CDATA[]]></value>
+    </entry>
+    <entry>
+      <key><![CDATA[LocalizedDescId]]></key>
+      <value><![CDATA[kcap2019351948_46]]></value>
+    </entry>
+    <entry>
+      <key><![CDATA[propertyMap]]></key>
+      <value><![CDATA[1]]></value>
+    </entry>
+    <entry>
+      <key><![CDATA[path]]></key>
+      <value><![CDATA[%2FCustom%2FCICD_Test%2FDM+FE+AR+Pending+Credit.xdm]]></value>
+    </entry>
+  </entries>
+</metadata>
